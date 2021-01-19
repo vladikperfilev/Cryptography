@@ -3,6 +3,7 @@ import smtplib
 from random import *
 import string
 import hashlib
+import datetime
 
 import os
 from flask import Flask, render_template, request
@@ -25,11 +26,13 @@ def login():
                     return render_template('login.html', message="Username not found")
                 onetime_pass = random_string()
                 send_email(email, onetime_pass)
-                save_hash(email, onetime_pass)
-                save_username(username)
+                validity_period = save_hash(email, onetime_pass)
+                save_username(username, validity_period)
                 return render_template('pass.html', message="One-time password has been sent to your e-mail")
             elif password is not None:
-                username = get_username()
+                username, validity_period = get_username()
+                if validity_period < datetime.datetime.now():
+                    return render_template('login.html', message="Your password is expired")
                 if compare_hashes(username, password):
                     return render_template('success.html', message=message)
                 else:
@@ -72,21 +75,28 @@ def send_email(email, onetime_pass):
 def save_hash(email, onetime_pass):
     with open("data.json", 'r+') as datafile:
         my_json = json.load(datafile)
+    validity_period = 0
     for user in my_json['users']:
         if user['email'] == email:
             user['md5_hash'] = hashlib.md5(onetime_pass.encode()).hexdigest()
+            validity_period = int(user["validity_period"])
     with open("data.json", 'w') as datafile:
         json.dump(my_json, datafile)
+    return validity_period
 
 
-def save_username(username):
+def save_username(username, validity_period):
     with open("current_user.txt", 'w') as file:
         file.write(username)
+        file.write('\n')
+        file.write(str(datetime.datetime.timestamp(datetime.datetime.now() + datetime.timedelta(seconds=validity_period))))
 
 
 def get_username():
     with open("current_user.txt", 'r') as file:
-        return file.read()
+        username = file.readline()[:-1]
+        validity = datetime.datetime.fromtimestamp(float(file.readline()))
+        return username, validity
 
 
 def compare_hashes(username, recieved_pass):
@@ -94,6 +104,8 @@ def compare_hashes(username, recieved_pass):
         my_json = json.load(datafile)
     for user in my_json['users']:
         if user['login'] == username:
+            hash1 = hashlib.md5(recieved_pass.encode()).hexdigest()
+            hash2 = user['md5_hash']
             if user['md5_hash'] == hashlib.md5(recieved_pass.encode()).hexdigest():
                 return True
             else:
